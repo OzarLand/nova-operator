@@ -2846,3 +2846,50 @@ var _ = Describe("Nova controller - cell transport URL secret rotation", func() 
 		}, timeout, interval).Should(Succeed())
 	})
 })
+
+var _ = Describe("Nova controller - cell0 reconcile errors", func() {
+	BeforeEach(func() {
+		CreateNovaWithNCellsAndEnsureReady(1, &novaNames)
+	})
+
+	It("reports the error and is not Ready when the cell0 secret cannot be updated", func() {
+		th.ExpectCondition(
+			novaNames.NovaName,
+			ConditionGetterFunc(NovaConditionGetter),
+			condition.ReadyCondition,
+			corev1.ConditionTrue,
+		)
+
+		// Make the cell0 internal secret controlled by another owner so
+		// that the Nova controller fails to update it.
+		Eventually(func(g Gomega) {
+			secret := th.GetSecret(cell0.InternalCellSecretName)
+			for i := range secret.OwnerReferences {
+				secret.OwnerReferences[i].Controller = ptr.To(false)
+			}
+			secret.OwnerReferences = append(secret.OwnerReferences, metav1.OwnerReference{
+				APIVersion: "v1",
+				Kind:       "ConfigMap",
+				Name:       "foreign-owner",
+				UID:        "6c1b3a6e-3c55-4ad4-9a9f-6f2f0c8e6b1d",
+				Controller: ptr.To(true),
+			})
+			g.Expect(k8sClient.Update(ctx, &secret)).To(Succeed())
+		}, timeout, interval).Should(Succeed())
+
+		// Rotate the service password to trigger the cell0 secret update
+		th.UpdateSecret(
+			types.NamespacedName{Namespace: novaNames.NovaName.Namespace, Name: SecretName},
+			"NovaPassword", []byte("rotated-password"))
+
+		Eventually(func(g Gomega) {
+			conditions := NovaConditionGetter(novaNames.NovaName)
+			allCellsReady := conditions.Get(novav1.NovaAllCellsReadyCondition)
+			g.Expect(allCellsReady).ToNot(BeNil())
+			g.Expect(allCellsReady.Status).To(Equal(corev1.ConditionFalse))
+			g.Expect(allCellsReady.Reason).To(BeEquivalentTo(condition.ErrorReason))
+			g.Expect(allCellsReady.Message).To(ContainSubstring("cell0("))
+			g.Expect(conditions.IsTrue(condition.ReadyCondition)).To(BeFalse())
+		}, timeout, interval).Should(Succeed())
+	})
+})
