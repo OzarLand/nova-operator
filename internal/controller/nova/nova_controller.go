@@ -722,7 +722,9 @@ func (r *NovaReconciler) Reconcile(ctx context.Context, req ctrl.Request) (resul
 
 	// Don't move forward with the top level service creations like NovaAPI
 	// until cell0 is ready as top level services need cell0 to register in
-	if cell0, ok := cells[novav1.Cell0Name]; !ok || !cell0.IsReady() ||
+	// NOTE: ensureCell returns a nil cell on error, so cells can hold a nil
+	// cell0 entry.
+	if cell0, ok := cells[novav1.Cell0Name]; !ok || cell0 == nil || !cell0.IsReady() ||
 		cell0.Generation > cell0.Status.ObservedGeneration {
 		// we need to stop here until cell0 is ready
 		Log.Info("Waiting for cell0 to become Ready before creating the top level services")
@@ -1463,7 +1465,7 @@ func (r *NovaReconciler) ensureCell(
 		notificationTransportURL, notificationRabbitmqUserName,
 		secret, acData)
 	if err != nil {
-		return nil, nova.CellDeploying, err
+		return nil, nova.CellFailed, err
 	}
 
 	cellSecretObj := &corev1.Secret{}
