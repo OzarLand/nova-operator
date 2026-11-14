@@ -823,7 +823,7 @@ func (r *NovaReconciler) Reconcile(ctx context.Context, req ctrl.Request) (resul
 			toDeletCells[cr.Spec.CellName] = cr.Spec.CellName
 			result, err := r.ensureCellDeleted(ctx, h, instance,
 				cr.Spec.CellName, apiTransportURL,
-				ospSecret, apiDB, cellDBs[novav1.Cell0Name].Database.GetDatabaseHostname(), cells[novav1.Cell0Name])
+				ospSecret, apiDB, cellDBs[novav1.Cell0Name].Database, cells[novav1.Cell0Name])
 			if err != nil {
 				deleteErrs = append(deleteErrs, fmt.Errorf("cell '%s' deletion failed, because: %w", cr.Spec.CellName, err))
 			}
@@ -1022,7 +1022,7 @@ func (r *NovaReconciler) ensureCellDeleted(
 	apiTransportURL string,
 	topLevelSecret corev1.Secret,
 	apiDB *mariadbv1.Database,
-	APIDatabaseHostname string,
+	cell0DB *mariadbv1.Database,
 	cell0 *novav1.NovaCell,
 ) (nova.CellDeploymentStatus, error) {
 	Log := r.GetLogger(ctx)
@@ -1052,8 +1052,10 @@ func (r *NovaReconciler) ensureCellDeleted(
 
 	dbName, accountName := novaapi.ServiceName+"-"+cell.Spec.CellName, cell.Spec.CellDatabaseAccount
 
+	// The job uses the nova-manage config of cell0, render it the same way
+	// as ensureCell does for cell0 as the config secret is shared.
 	configHash, scriptName, configName, err := r.ensureNovaManageJobSecret(ctx, h, instance,
-		cell0, topLevelSecret, APIDatabaseHostname, apiTransportURL, apiDB)
+		cell0, topLevelSecret, apiDB.GetDatabaseHostname(), apiTransportURL, cell0DB)
 	if err != nil {
 		return nova.CellDeleteFailed, err
 	}

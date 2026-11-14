@@ -1019,6 +1019,36 @@ var _ = Describe("Nova multi cell deletion", func() {
 
 		})
 
+		It("configures the cell delete job with the API DB", func() {
+			Eventually(func(g Gomega) {
+				nova := GetNova(novaNames.NovaName)
+				delete(nova.Spec.CellTemplates, "cell2")
+				g.Expect(k8sClient.Update(ctx, nova)).To(Succeed())
+			}, timeout, interval).Should(Succeed())
+
+			// the delete job is created with the cell0 nova-manage config
+			th.GetJob(cell2.CellDeleteJobName)
+
+			apiAccount := mariadb.GetMariaDBAccount(novaNames.APIMariaDBDatabaseAccount)
+			apiSecret := th.GetSecret(types.NamespacedName{Name: apiAccount.Spec.Secret, Namespace: novaNames.APIMariaDBDatabaseAccount.Namespace})
+			expectedAPIDBConnection := fmt.Sprintf(
+				"[api_database]\nmax_retries = 30\nretry_interval = 1\nconnection = mysql+pymysql://%s:%s@hostname-for-%s.%s.svc/nova_api?read_default_file=/etc/my.cnf",
+				apiAccount.Spec.UserName, apiSecret.Data[mariadbv1.DatabasePasswordSelector],
+				novaNames.APIMariaDBDatabaseName.Name, novaNames.Namespace)
+
+			// the config is rendered by the cell0 and the cell delete handling
+			// while the deletion is pending, both need to use the API DB
+			Consistently(func(g Gomega) {
+				configDataMap := &corev1.Secret{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Namespace: novaNames.Namespace,
+					Name:      cell0.CellCRName.Name + "-manage-config-data",
+				}, configDataMap)).To(Succeed())
+				g.Expect(configDataMap.Data).Should(HaveKey("01-nova.conf"))
+				g.Expect(string(configDataMap.Data["01-nova.conf"])).To(ContainSubstring(expectedAPIDBConnection))
+			}, consistencyTimeout, interval).Should(Succeed())
+		})
+
 		It("retrieve sorted cells", func() {
 			cellList := &novav1.NovaCellList{
 				Items: []novav1.NovaCell{
