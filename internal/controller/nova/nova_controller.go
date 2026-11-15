@@ -1050,6 +1050,24 @@ func (r *NovaReconciler) ensureCellDeleted(
 		return nova.CellDeleteComplete, nil
 	}
 
+	// The cell mapping Job of the cell might still be running, e.g. when a
+	// newly added cell is removed again. Wait for it to finish, otherwise the
+	// delete Job could find the cell unmapped and the mapping could be created
+	// afterwards, pointing to the deleted cell DB.
+	mappingJob := &batchv1.Job{}
+	err = r.Client.Get(ctx, types.NamespacedName{
+		Name:      nova.CellMappingJobName(instance, cell),
+		Namespace: instance.Namespace,
+	}, mappingJob)
+	if err != nil && !k8s_errors.IsNotFound(err) {
+		return nova.CellDeleteFailed, err
+	}
+	if err == nil && !isJobFinished(mappingJob) {
+		Log.Info("Waiting for the cell mapping Job to finish before deleting the cell",
+			"cell", cell.Spec.CellName, "job", mappingJob.Name)
+		return nova.CellDeleteInProgress, nil
+	}
+
 	dbName, accountName := novaapi.ServiceName+"-"+cell.Spec.CellName, cell.Spec.CellDatabaseAccount
 
 	configHash, scriptName, configName, err := r.ensureNovaManageJobSecret(ctx, h, instance,

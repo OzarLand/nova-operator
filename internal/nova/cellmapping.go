@@ -12,6 +12,11 @@ import (
 	novav1 "github.com/openstack-k8s-operators/nova-operator/api/nova/v1beta1"
 )
 
+// CellMappingJobName returns the name of the cell mapping Job of the cell
+func CellMappingJobName(instance *novav1.Nova, cell *novav1.NovaCell) string {
+	return instance.Name + "-" + cell.Spec.CellName + "-cell-mapping"
+}
+
 // CellMappingJob creates a Kubernetes job to create Nova cell mappings
 func CellMappingJob(
 	instance *novav1.Nova,
@@ -31,7 +36,7 @@ func CellMappingJob(
 
 	env := env.MergeEnvs([]corev1.EnvVar{}, envVars)
 
-	jobName := instance.Name + "-" + cell.Spec.CellName + "-cell-mapping"
+	jobName := CellMappingJobName(instance, cell)
 
 	volumes := []corev1.Volume{
 		GetConfigVolume(configName),

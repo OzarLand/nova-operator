@@ -437,6 +437,43 @@ var _ = Describe("Nova multi cell", func() {
 			metadata := GetNovaMetadata(novaNames.MetadataName)
 			Expect(metadata.Spec.RegisteredCells).To(Equal(nova.Status.RegisteredCells))
 		})
+		It("waits for the cell mapping job before deleting a removed cell", func() {
+			mariadb.SimulateMariaDBDatabaseCompleted(novaNames.APIMariaDBDatabaseName)
+			mariadb.SimulateMariaDBAccountCompleted(novaNames.APIMariaDBDatabaseAccount)
+			mariadb.SimulateMariaDBDatabaseCompleted(cell0.MariaDBDatabaseName)
+			mariadb.SimulateMariaDBAccountCompleted(cell0.MariaDBAccountName)
+			infra.SimulateTransportURLReady(cell0.TransportURLName)
+			th.SimulateJobSuccess(cell0.DBSyncJobName)
+			th.SimulateStatefulSetReplicaReady(cell0.ConductorStatefulSetName)
+			th.SimulateJobSuccess(cell0.CellMappingJobName)
+			th.SimulateStatefulSetReplicaReady(novaNames.APIStatefulSetName)
+			keystone.SimulateKeystoneEndpointReady(novaNames.APIKeystoneEndpointName)
+			mariadb.SimulateMariaDBDatabaseCompleted(cell1.MariaDBDatabaseName)
+			mariadb.SimulateMariaDBAccountCompleted(cell1.MariaDBAccountName)
+			infra.SimulateTransportURLReady(cell1.TransportURLName)
+			th.SimulateStatefulSetReplicaReady(cell1.NoVNCProxyStatefulSetName)
+			th.SimulateJobSuccess(cell1.DBSyncJobName)
+			th.SimulateStatefulSetReplicaReady(cell1.NovaComputeStatefulSetName)
+			th.SimulateStatefulSetReplicaReady(cell1.ConductorStatefulSetName)
+			// the cell1 mapping job is created but not finished yet
+			th.GetJob(cell1.CellMappingJobName)
+
+			// cell1 is removed while its mapping job is still running
+			Eventually(func(g Gomega) {
+				nova := GetNova(novaNames.NovaName)
+				delete(nova.Spec.CellTemplates, "cell1")
+				g.Expect(k8sClient.Update(ctx, nova)).To(Succeed())
+			}, timeout, interval).Should(Succeed())
+
+			// the delete job could find the cell unmapped while the mapping
+			// job maps it later, so the deletion waits for the mapping job
+			AssertJobRemainsAbsent(cell1.CellDeleteJobName)
+			GetNovaCell(cell1.CellCRName)
+
+			th.SimulateJobSuccess(cell1.CellMappingJobName)
+			th.GetJob(cell1.CellDeleteJobName)
+		})
+
 		It("creates cell2 NovaCell ready", func() {
 			mariadb.SimulateMariaDBDatabaseCompleted(novaNames.APIMariaDBDatabaseName)
 			mariadb.SimulateMariaDBAccountCompleted(novaNames.APIMariaDBDatabaseAccount)
