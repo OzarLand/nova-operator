@@ -28,6 +28,8 @@ import (
 
 	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	k8s_errors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/kubernetes"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -403,6 +405,21 @@ func getNovaClient(
 	// need 2.53 to be able to delete services based on UUID.
 	client.Microversion = "2.95"
 	return client, nil
+}
+
+// isJobFinished returns true if the Job succeeded or permanently failed. A
+// Job that failed but is retried is not finished.
+func isJobFinished(job *batchv1.Job) bool {
+	if job.Status.Succeeded > 0 {
+		return true
+	}
+	for _, c := range job.Status.Conditions {
+		if (c.Type == batchv1.JobComplete || c.Type == batchv1.JobFailed) &&
+			c.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+	return false
 }
 
 func getCellDatabaseName(cellName string) string {
