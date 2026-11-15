@@ -219,6 +219,16 @@ type NovaCellSpec struct {
 	// TopologyRef to apply the Topology defined by the associated CR referenced
 	// by name
 	TopologyRef *topologyv1.TopoRef `json:"topologyRef,omitempty"`
+
+	// +kubebuilder:validation:Optional
+	// RegisteredCells is a map keyed by the names of the other cells that are
+	// registered in the nova_api database with a value that is the hash of the
+	// given cell configuration. It is only set for the cell that runs the
+	// superconductor (cell0, or a cell using the top level message bus) as the
+	// superconductor caches the connections to the other cells. It is used to
+	// restart the superconductor when another cell is reconfigured to refresh
+	// its in memory cell caches.
+	RegisteredCells map[string]string `json:"registeredCells,omitempty"`
 }
 
 // NovaCellDBPurge defines the parameters for the DB archiving and purging

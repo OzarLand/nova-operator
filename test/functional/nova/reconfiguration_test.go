@@ -109,6 +109,8 @@ var _ = Describe("Nova reconfiguration", func() {
 				err := k8sClient.Get(ctx, cell1.TransportURLName, instance)
 				g.Expect(k8s_errors.IsNotFound(err)).To(BeTrue())
 			}, timeout, interval).Should(Succeed())
+			// The superconductor is restarted after cell1 got deleted
+			SimulateSuperconductorReady()
 			th.ExpectCondition(
 				novaNames.NovaName,
 				ConditionGetterFunc(NovaConditionGetter),

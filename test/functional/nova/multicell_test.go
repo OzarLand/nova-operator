@@ -542,6 +542,12 @@ var _ = Describe("Nova multi cell", func() {
 				novav1.NovaConductorReadyCondition,
 				corev1.ConditionTrue,
 			)
+			// The superconductor is restarted after cell1 and cell2 got mapped
+			Eventually(func(g Gomega) {
+				g.Expect(GetNova(novaNames.NovaName).Status.RegisteredCells).To(
+					HaveKey(cell2.CellCRName.Name))
+			}, timeout, interval).Should(Succeed())
+			SimulateSuperconductorReady()
 			// As cell2 was the last cell to deploy all cells is ready now and
 			// Nova becomes ready
 			th.ExpectCondition(
@@ -758,6 +764,17 @@ var _ = Describe("Nova multi cell", func() {
 				corev1.ConditionTrue,
 			)
 
+			// The cell0 conductor, even with 0 replicas, is updated after cell1
+			// got mapped
+			Eventually(func(g Gomega) {
+				g.Expect(GetNova(novaNames.NovaName).Status.RegisteredCells).To(
+					HaveKey(cell1.CellCRName.Name))
+			}, timeout, interval).Should(Succeed())
+			SimulateSuperconductorReady()
+			// cell1 uses the top level message bus so its conductor acts as
+			// the superconductor too
+			Expect(GetNovaCell(cell1.CellCRName).Spec.RegisteredCells).To(
+				HaveKey(cell0.CellCRName.Name))
 			SimulateReadyOfNovaTopServices()
 			th.ExpectCondition(
 				novaNames.NovaName,
@@ -1005,6 +1022,8 @@ var _ = Describe("Nova multi cell deletion", func() {
 				g.Expect(nova.Status.RegisteredCells).To(HaveKey(cell2.CellCRName.Name))
 				g.Expect(nova.Status.RegisteredCells).NotTo(HaveKey(cell3.CellCRName.Name))
 			}, timeout, interval).Should(Succeed())
+			// The superconductor is restarted after cell3 got deleted
+			SimulateSuperconductorReady()
 
 			GetNovaCell(cell2.CellCRName)
 			NovaCellNotExists(cell3.CellCRName)

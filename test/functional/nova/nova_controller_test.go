@@ -2846,3 +2846,97 @@ var _ = Describe("Nova controller - cell transport URL secret rotation", func() 
 		}, timeout, interval).Should(Succeed())
 	})
 })
+
+var _ = Describe("Nova controller - cell transport rotation and the superconductor", func() {
+	BeforeEach(func() {
+		CreateNovaWithNCellsAndEnsureReady(2, &novaNames)
+	})
+
+	It("restarts the cell0 conductor before releasing the old cell transport secret", func() {
+		cell1TransportSecretName := fmt.Sprintf("%s-secret", cell1.TransportURLName.Name)
+		Eventually(func(g Gomega) {
+			secret := th.GetSecret(types.NamespacedName{
+				Namespace: novaNames.NovaName.Namespace,
+				Name:      cell1TransportSecretName,
+			})
+			g.Expect(secret.Finalizers).To(
+				ContainElement(nova.TransportConsumerFinalizer))
+		}, timeout, interval).Should(Succeed())
+		cell0ConductorHash := GetEnvVarValue(
+			th.GetStatefulSet(cell0.ConductorStatefulSetName).Spec.Template.Spec.Containers[0].Env, "CONFIG_HASH", "")
+		Expect(cell0ConductorHash).NotTo(BeEmpty())
+		// Only the superconductor cell tracks the other cells
+		Expect(GetNovaCell(cell0.CellCRName).Spec.RegisteredCells).To(
+			HaveKey(cell1.CellCRName.Name))
+		Expect(GetNovaCell(cell1.CellCRName).Spec.RegisteredCells).To(BeEmpty())
+
+		// Rotate the cell1 transport URL secret, e.g. a new RabbitMQ user
+		newCellSecretName := "rabbitmq-cell1-secret-rotated" //nolint:gosec
+		newSecret := th.CreateSecret(
+			types.NamespacedName{
+				Namespace: novaNames.NovaName.Namespace,
+				Name:      newCellSecretName,
+			},
+			map[string][]byte{
+				"transport_url": []byte("rabbit://rotated-cell1-user:rotated-pass@rabbitmq-cell1/fake"),
+			},
+		)
+		DeferCleanup(k8sClient.Delete, ctx, newSecret)
+		Eventually(func(g Gomega) {
+			transport := infra.GetTransportURL(cell1.TransportURLName)
+			transport.Status.SecretName = newCellSecretName
+			g.Expect(k8sClient.Status().Update(ctx, transport)).To(Succeed())
+		}, timeout, interval).Should(Succeed())
+
+		// cell1 and the top level services roll out with the new cell1
+		// mapping, but not the cell0 conductor yet
+		Eventually(func(g Gomega) {
+			th.SimulateJobSuccess(cell1.CellMappingJobName)
+			th.SimulateJobSuccess(cell1.HostDiscoveryJobName)
+			th.SimulateStatefulSetReplicaReady(cell1.ConductorStatefulSetName)
+			th.SimulateStatefulSetReplicaReady(cell1.NoVNCProxyStatefulSetName)
+			th.SimulateStatefulSetReplicaReady(cell1.NovaComputeStatefulSetName)
+			th.SimulateStatefulSetReplicaReady(novaNames.APIStatefulSetName)
+			th.SimulateStatefulSetReplicaReady(novaNames.SchedulerStatefulSetName)
+			th.SimulateStatefulSetReplicaReady(novaNames.MetadataStatefulSetName)
+			// The cell0 conductor is the superconductor. It caches the
+			// connection to the cell1 message bus from the cell mapping, so
+			// it needs a restart with the new cell1 mapping too.
+			g.Expect(GetEnvVarValue(
+				th.GetStatefulSet(cell0.ConductorStatefulSetName).Spec.Template.Spec.Containers[0].Env, "CONFIG_HASH", "")).NotTo(Equal(cell0ConductorHash))
+		}, 2*timeout, interval).Should(Succeed())
+
+		// The old RabbitMQ user is still used by the running cell0 conductor
+		// so the old secret must not be released yet. Everything else is
+		// kept ready so that the cell0 conductor is the only pending service.
+		Consistently(func(g Gomega) {
+			th.SimulateStatefulSetReplicaReady(cell1.ConductorStatefulSetName)
+			th.SimulateStatefulSetReplicaReady(cell1.NoVNCProxyStatefulSetName)
+			th.SimulateStatefulSetReplicaReady(cell1.NovaComputeStatefulSetName)
+			th.SimulateStatefulSetReplicaReady(novaNames.APIStatefulSetName)
+			th.SimulateStatefulSetReplicaReady(novaNames.SchedulerStatefulSetName)
+			th.SimulateStatefulSetReplicaReady(novaNames.MetadataStatefulSetName)
+			secret := th.GetSecret(types.NamespacedName{
+				Namespace: novaNames.NovaName.Namespace,
+				Name:      cell1TransportSecretName,
+			})
+			g.Expect(secret.Finalizers).To(
+				ContainElement(nova.TransportConsumerFinalizer))
+		}, consistencyTimeout, interval).Should(Succeed())
+
+		// The old secret is released once the cell0 conductor runs with the
+		// new cell1 mapping
+		Eventually(func(g Gomega) {
+			th.SimulateStatefulSetReplicaReady(cell0.ConductorStatefulSetName)
+			th.SimulateStatefulSetReplicaReady(novaNames.APIStatefulSetName)
+			th.SimulateStatefulSetReplicaReady(novaNames.SchedulerStatefulSetName)
+			th.SimulateStatefulSetReplicaReady(novaNames.MetadataStatefulSetName)
+			secret := th.GetSecret(types.NamespacedName{
+				Namespace: novaNames.NovaName.Namespace,
+				Name:      cell1TransportSecretName,
+			})
+			g.Expect(secret.Finalizers).NotTo(
+				ContainElement(nova.TransportConsumerFinalizer))
+		}, 2*timeout, interval).Should(Succeed())
+	})
+})

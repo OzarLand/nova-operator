@@ -1638,6 +1638,18 @@ spec:
                 description: Region - the region name to use for service endpoint
                   discovery
                 type: string
+              registeredCells:
+                additionalProperties:
+                  type: string
+                description: |-
+                  RegisteredCells is a map keyed by the names of the other cells that are
+                  registered in the nova_api database with a value that is the hash of the
+                  given cell configuration. It is only set for the cell that runs the
+                  superconductor (cell0, or a cell using the top level message bus) as the
+                  superconductor caches the connections to the other cells. It is used to
+                  restart the superconductor when another cell is reconfigured to refresh
+                  its in memory cell caches.
+                type: object
               secret:
                 description: |-
                   Secret is the name of the Secret instance containing password

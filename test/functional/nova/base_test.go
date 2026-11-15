@@ -1128,6 +1128,12 @@ func CreateNovaWithNCellsAndEnsureReady(cellNumber int, novaNames *NovaNames) {
 
 	}
 
+	// The superconductor is restarted once all the cells got mapped
+	Eventually(func(g Gomega) {
+		g.Expect(GetNova(novaNames.NovaName).Status.RegisteredCells).To(HaveLen(cellNumber))
+	}, timeout, interval).Should(Succeed())
+	SimulateSuperconductorReady()
+
 	// Final Ready condition check
 	th.ExpectCondition(
 		novaNames.NovaName,
@@ -1142,4 +1148,30 @@ func CreateNovaWithNCellsAndEnsureReady(cellNumber int, novaNames *NovaNames) {
 		condition.ReadyCondition,
 		corev1.ConditionTrue,
 	)
+}
+
+// SimulateSuperconductorReady simulates the restart of the cell0 conductor,
+// the superconductor, that happens when the other cells are mapped, re-mapped
+// or deleted, and waits until cell0 is ready with the current registered
+// cells.
+func SimulateSuperconductorReady() {
+	Eventually(func(g Gomega) {
+		th.SimulateStatefulSetReplicaReady(cell0.ConductorStatefulSetName)
+
+		nova := GetNova(novaNames.NovaName)
+		expectedCells := map[string]string{}
+		for name, hash := range nova.Status.RegisteredCells {
+			if name != cell0.CellCRName.Name {
+				expectedCells[name] = hash
+			}
+		}
+		cell := GetNovaCell(cell0.CellCRName)
+		if len(expectedCells) == 0 {
+			g.Expect(cell.Spec.RegisteredCells).To(BeEmpty())
+		} else {
+			g.Expect(cell.Spec.RegisteredCells).To(Equal(expectedCells))
+		}
+		g.Expect(cell.Status.ObservedGeneration).To(Equal(cell.Generation))
+		g.Expect(cell.Status.Conditions.IsTrue(condition.ReadyCondition)).To(BeTrue())
+	}, timeout, interval).Should(Succeed())
 }
