@@ -1019,6 +1019,47 @@ var _ = Describe("Nova multi cell deletion", func() {
 
 		})
 
+		It("forgets the host discovery of a deleted cell", func() {
+			nova := GetNova(novaNames.NovaName)
+			Expect(nova.Status.DiscoveredCells).To(HaveKey(cell1.CellCRName.Name))
+
+			Eventually(func(g Gomega) {
+				nova := GetNova(novaNames.NovaName)
+				delete(nova.Spec.CellTemplates, "cell1")
+				g.Expect(k8sClient.Update(ctx, nova)).To(Succeed())
+			}, timeout, interval).Should(Succeed())
+			th.SimulateJobSuccess(cell1.CellDeleteJobName)
+			Eventually(func(g Gomega) {
+				nova := GetNova(novaNames.NovaName)
+				g.Expect(nova.Status.RegisteredCells).NotTo(HaveKey(cell1.CellCRName.Name))
+			}, timeout, interval).Should(Succeed())
+			NovaCellNotExists(cell1.CellCRName)
+
+			// A re-created cell needs a new host discovery, so the hash of
+			// the discovery of the deleted cell must not be kept
+			nova = GetNova(novaNames.NovaName)
+			Expect(nova.Status.DiscoveredCells).NotTo(HaveKey(cell1.CellCRName.Name))
+		})
+
+		It("forgets the host discovery of a cell without computes", func() {
+			nova := GetNova(novaNames.NovaName)
+			Expect(nova.Status.DiscoveredCells).To(HaveKey(cell1.CellCRName.Name))
+
+			Eventually(func(g Gomega) {
+				nova := GetNova(novaNames.NovaName)
+				cellTemplate := nova.Spec.CellTemplates["cell1"]
+				cellTemplate.NovaComputeTemplates = nil
+				nova.Spec.CellTemplates["cell1"] = cellTemplate
+				g.Expect(k8sClient.Update(ctx, nova)).To(Succeed())
+			}, timeout, interval).Should(Succeed())
+
+			// Computes added again later need a new host discovery
+			Eventually(func(g Gomega) {
+				nova := GetNova(novaNames.NovaName)
+				g.Expect(nova.Status.DiscoveredCells).NotTo(HaveKey(cell1.CellCRName.Name))
+			}, timeout, interval).Should(Succeed())
+		})
+
 		It("retrieve sorted cells", func() {
 			cellList := &novav1.NovaCellList{
 				Items: []novav1.NovaCell{
