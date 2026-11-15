@@ -830,6 +830,7 @@ func (r *NovaReconciler) Reconcile(ctx context.Context, req ctrl.Request) (resul
 			if result == nova.CellDeleteComplete {
 				Log.Info("Cell deleted", "cell", cr.Spec.CellName)
 				delete(instance.Status.RegisteredCells, cr.Name)
+				delete(instance.Status.DiscoveredCells, cr.Name)
 				delete(toDeletCells, cr.Spec.CellName)
 			}
 		}
@@ -1603,6 +1604,9 @@ func (r *NovaReconciler) ensureNovaComputeDiscover(
 ) (nova.CellDeploymentStatus, error) {
 	Log := r.GetLogger(ctx)
 	if len(cellTemplate.NovaComputeTemplates) == 0 {
+		// Forget the previous discovery so that computes added again later
+		// are discovered again.
+		delete(instance.Status.DiscoveredCells, cell.Name)
 		return nova.CellComputeDiscoveryReady, nil
 	}
 	if !cell.Status.Conditions.IsTrue(novav1.NovaAllControlPlaneComputesReadyCondition) {
