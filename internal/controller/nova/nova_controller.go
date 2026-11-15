@@ -1506,6 +1506,18 @@ func (r *NovaReconciler) ensureCell(
 		cellSpec.APIDatabaseHostname = apiDB.GetDatabaseHostname()
 		cellSpec.APIDatabaseAccount = instance.Spec.APIDatabaseAccount
 	}
+	if isSuperconductorCell(instance, cellName, cellTemplate) {
+		// The superconductor caches the DB and message bus connections to the
+		// other cells based on their cell mapping, so it needs to be
+		// restarted when another cell is re-mapped, e.g. after its transport
+		// URL changed.
+		cellSpec.RegisteredCells = map[string]string{}
+		for name, hash := range instance.Status.RegisteredCells {
+			if name != getNovaCellCRName(instance.Name, cellName) {
+				cellSpec.RegisteredCells[name] = hash
+			}
+		}
+	}
 
 	cell := &novav1.NovaCell{
 		ObjectMeta: metav1.ObjectMeta{

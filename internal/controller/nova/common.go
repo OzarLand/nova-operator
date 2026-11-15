@@ -405,6 +405,29 @@ func getNovaClient(
 	return client, nil
 }
 
+// isSuperconductorCell returns true if the conductor of the cell acts as the
+// superconductor, i.e. it consumes the requests of the top level services.
+// That is always the case for cell0, and for a cell that uses the same
+// message bus as the top level services, e.g. in a collapsed cell layout.
+func isSuperconductorCell(
+	instance *novav1.Nova, cellName string, cellTemplate novav1.NovaCellTemplate,
+) bool {
+	if cellName == novav1.Cell0Name {
+		return true
+	}
+	return cellTemplate.MessagingBus.Cluster == instance.Spec.MessagingBus.Cluster &&
+		normalizeVhost(cellTemplate.MessagingBus.Vhost) == normalizeVhost(instance.Spec.MessagingBus.Vhost)
+}
+
+// normalizeVhost returns the RabbitMQ vhost name, an empty vhost means the
+// default "/" vhost.
+func normalizeVhost(vhost string) string {
+	if vhost == "" {
+		return "/"
+	}
+	return vhost
+}
+
 func getCellDatabaseName(cellName string) string {
 	return "nova_" + cellName
 }

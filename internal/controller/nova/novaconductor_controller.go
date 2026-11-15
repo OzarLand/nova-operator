@@ -218,6 +218,18 @@ func (r *NovaConductorReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	hashes[instance.Spec.Secret] = env.SetValue(secretHash)
 
+	// The superconductor needs to be restarted if the registered cells change
+	// to refresh its in memory cell caches. Only the cell running the
+	// superconductor gets RegisteredCells, so the input hash of the other
+	// conductors is not changed.
+	if len(instance.Spec.RegisteredCells) > 0 {
+		cellHash, err := hashOfStringMap(instance.Spec.RegisteredCells)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		hashes["cells"] = env.SetValue(cellHash)
+	}
+
 	// all our input checks out so report InputReady
 	instance.Status.Conditions.MarkTrue(condition.InputReadyCondition, condition.InputReadyMessage)
 
